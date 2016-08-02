@@ -70,9 +70,9 @@ class DroneTournament
   end
 
   def create_new_game(player_id)
-    game = @db_connection.exec("INSERT INTO Games (state, created) VALUES ('BUILD', NOW()) RETURNING *")
+    game = @db_connection.exec("INSERT INTO Games (state, created) VALUES ('build', NOW()) RETURNING *")
     game = game[0]
-    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id) VALUES ('#{game["id"]}', '#{player_id}')")
+    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id, player_state) VALUES ('#{game["id"]}', '#{player_id}', 'plan')")
     unit_info = { game_id: game["id"], player_id: player_id, armor: 5, x: 100, y: 100,
                   heading: -30, energy: 0, type: "T-Fighter", team: 1}
     create_new_unit(unit_info)
@@ -88,7 +88,10 @@ class DroneTournament
   end
 
   def end_turn(game_id, move_requests)
-    
+    player_id = move_requests["player_id"]
+    player_state = @db_connection.exec("UPDATE ActiveGames SET player_state='finished' WHERE game_id=#{game_id} AND player_id=#{player_id} RETURNING *")
+    # TODO: here update units in database with moves from input
+    player_state = player_state[0]
   end
 
   def drop_tables()
@@ -103,7 +106,7 @@ class DroneTournament
   def setup_tables()
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Games(id SERIAL, state VARCHAR(20), created TIMESTAMP)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Players(id SERIAL, username VARCHAR(50))")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_id INTEGER)")
+    @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_id INTEGER, player_state VARCHAR(20))")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Units(id SERIAL, game_id INTEGER, player_id INTEGER, armor FLOAT, x FLOAT, y FLOAT, heading FLOAT, energy FLOAT, type VARCHAR(30), team INTEGER)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Types(id SERIAL, name VARCHAR(20), speed FLOAT, turn FLOAT, armor FLOAT, full_energy FLOAT, charge_energy FLOAT, image VARCHAR(20))")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Particles(id SERIAL, game_id INTEGER, team INTEGER, x FLOAT, y FLOAT, heading FLOAT, speed FLOAT, power FLOAT)")

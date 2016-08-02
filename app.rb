@@ -1,41 +1,51 @@
 require 'sinatra'
 require 'sinatra/json'
+require 'sinatra/cross_origin'
 require 'thin'
 require './dronetournament'
+require 'json'
+
+configure do
+  enable :cross_origin
+end
+
+set :allow_origin, :any
+set :allow_methods, [:get, :post, :put, :options, :delete]
+set :expose_headers, ['Content-Type']
+
+options '*' do
+  response.headers['Allow'] = "GET,POST,PUT,DELETE,OPTIONS"
+  response.headers['Access-Control-Allow-Headers'] = "X-Requested-With, X-HTTP-Method-Override, Content-Type, Cache-Control, Accept"
+  200
+end
 
 get '/' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
   erb :home
 end
 
 post '/dronetournament/sign_in/:username' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
   json DroneTournament.new.sign_in(params['username'])
 end
 
 get '/dronetournament/games/:player_id' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
   json DroneTournament.new.list_games(params['player_id'])
 end
 
 get '/dronetournament/game/:game_id' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
   json DroneTournament.new.get_game(params['game_id'])
 end
 
 get '/dronetournament/units/:game_id' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
   json DroneTournament.new.get_units(param['game_id'])
 end
 
 post '/dronetournament/unit/:game_id/:player_id/:unit_type' do
-  response.headers['Access-Control-Allow-Origin'] = "*"
-  json DroneTournament.new.create_new_unit(param['game_id'], param['player_id'], param['unit_type'])
+  json DroneTournament.new.create_new_unit(params['game_id'], params['player_id'], params['unit_type'])
 end
 
-post 'dronetournament/end_turn/:game_id' do
+post '/dronetournament/end_turn/:game_id' do
   move_requests = JSON.parse(request.body.read)
-  json DroneTournament.new.end_turn(param['game_id'], move_requests)
+  json DroneTournament.new.end_turn(params['game_id'], move_requests["data"])
 end
 
 post '/dronetournament/setup' do

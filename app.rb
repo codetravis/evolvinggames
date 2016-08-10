@@ -48,12 +48,20 @@ post '/dronetournament/end_turn/:game_id' do
   json DroneTournament.new.end_turn(params['game_id'], move_requests["data"])
 end
 
+get '/dronetournament/next_turn/:game_id' do
+  json DroneTournament.new.next_turn(params['game_id'])
+end
+
 post '/dronetournament/setup' do
   json DroneTournament.new.setup_tables()
 end
 
 post '/dronetournament/new_game/:player_id' do
   json DroneTournament.new.create_new_game(params["player_id"])
+end
+
+post '/dronetournament/join_game/:player_id' do
+  json DroneTournament.new.join_game(params["player_id"])
 end
 
 delete '/dronetournament/destroy' do

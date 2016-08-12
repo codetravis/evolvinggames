@@ -66,10 +66,10 @@ class DroneTournament
   end
 
   def create_new_game(player_id)
-    game = @db_connection.exec("INSERT INTO Games (state, created) VALUES ('build', NOW()) RETURNING *")
+    game = @db_connection.exec("INSERT INTO Games (state, created, turn, max_turns) VALUES ('build', NOW(), 1, 30) RETURNING *")
     game = game[0]
-    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id, player_state) VALUES ('#{game["id"]}', '#{player_id}', 'plan')")
-    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id, player_state) VALUES ('#{game["id"]}', 0, 'empty')")
+    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id, player_state, turn, state_updated) VALUES ('#{game["id"]}', '#{player_id}', 'plan', 1, NOW())")
+    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_id, player_state, turn, state_updated) VALUES ('#{game["id"]}', 0, 'empty', 1, NOW())")
     unit_one_info = { game_id: game["id"], player_id: player_id, armor: 5, x: 100, y: 100,
                   heading: -30, energy: 0, type: "T-Fighter", team: 1}
     unit_two_info = { game_id: game["id"], player_id: 0, armor: 2, x: 200, y: 250,
@@ -80,8 +80,11 @@ class DroneTournament
   end
 
   def create_new_unit(unit_info)
-    insert_statement = "INSERT INTO Units (game_id, player_id, armor, x, y, heading, energy, type, team) "
-    insert_statement += "VALUES (#{unit_info[:game_id]}, #{unit_info[:player_id]}, #{unit_info[:armor]}, #{unit_info[:x]}, #{unit_info[:y]}, #{unit_info[:heading]}, #{unit_info[:energy]}, '#{unit_info[:type]}', #{unit_info[:team]}) "
+    insert_statement = "INSERT INTO Units (game_id, player_id, armor, x, y, heading, control_x, control_y, control_heading, energy, type, team) "
+    insert_statement += "VALUES (#{unit_info[:game_id]}, #{unit_info[:player_id]}, #{unit_info[:armor]}, " +
+      "#{unit_info[:x]}, #{unit_info[:y]}, #{unit_info[:heading]}, " +
+      "#{unit_info[:x]}, #{unit_info[:y]}, #{unit_info[:heading]}, " +
+      "#{unit_info[:energy]}, '#{unit_info[:type]}', #{unit_info[:team]}) "
     insert_statement += "RETURNING *"
     new_unit = @db_connection.exec(insert_statement)
     new_unit = new_unit[0]
@@ -102,6 +105,7 @@ class DroneTournament
           next
         else
           new_player = @db_connection.exec("UPDATE ActiveGames SET player_id=#{player_id}, player_state='plan' WHERE game_id=#{game_id} AND player_state='empty' RETURNING *")
+          @db_connection.exec("UPDATE Units SET player_id=#{player_id} WHERE game_id=#{game_id} AND player_id=0")
           break
         end
       end
@@ -111,15 +115,26 @@ class DroneTournament
 
   def end_turn(game_id, move_requests)
     player_id = move_requests["player_id"]
-    player_state = @db_connection.exec("UPDATE ActiveGames SET player_state='finished', state_updated=NOW() WHERE game_id=#{game_id} AND player_id=#{player_id} RETURNING *")
-    move_requests["moves"].each do |move|
-      @db_connection.exec("UPDATE Units SET x=#{move["x"]}, y=#{move["y"]}, heading=#{move["heading"]} WHERE player_id=#{player_id} AND id=#{move["unit_id"]}");
+    player_state = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_id=#{player_id} ")
+    game = get_game(game_id)
+    if game["turn"] == player_state[0]["turn"]
+      player_state = @db_connection.exec("UPDATE ActiveGames SET player_state='finished', state_updated=NOW() WHERE game_id=#{game_id} AND player_id=#{player_id} RETURNING *")
+      move_requests["moves"].each do |move|
+        if move["x"] == "null"
+          move["x"] = 1
+          move["y"] = 1
+          move["heading"] = 1
+        end
+
+        @db_connection.exec("UPDATE Units SET control_x=#{move["x"]}, control_y=#{move["y"]}, control_heading=#{move["heading"]} WHERE player_id=#{player_id} AND id=#{move["unit_id"]}");
+      end
     end
     player_state = player_state[0]
   end
 
-  def next_turn(game_id)
+  def next_turn(game_id, player_id)
     players = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id='#{game_id}'")
+    game = get_game(game_id)
     action = "Ready"
     first_action = 0
     players.each do |player|
@@ -127,19 +142,61 @@ class DroneTournament
         first_action = DateTime.parse(player["state_updated"]).to_time.to_i
       end
 
-      if player["player_state"] != "finished"
+      if player["player_state"] != "finished" && game["turn"] == player["turn"]
         action = "Waiting"
       end
     end
 
     puts "Now         : " + Time.now.to_i.to_s
     puts "First Action: " + first_action.to_s
-    if Time.now.to_i - first_action > 6000
-      action = "Ready"
+    # if Time.now.to_i - first_action > 600
+    #   action = "Ready"
+    # end
+
+    if action == "Ready"
+      units = get_units(game_id)
+      game_turn = game["turn"].to_i
+      set_player_state(game_id, player_id, "plan", game_turn + 1)
+      if (check_all_players_ready(game_id, game["turn"]))
+        @db_connection.exec("UPDATE Games SET turn=#{game_turn + 1} WHERE id=#{game_id}")
+        update_unit_positions(game_id, units)
+      end
     end
 
-    { action: action }
+    { action: action, units: units }
   end
+
+  def update_unit_positions(game_id, units)
+    units.each do |unit|
+      control_defaults = get_new_control_defaults(unit)
+      @db_connection.exec("UPDATE Units SET x=#{unit["control_x"]}, y=#{unit["control_y"]}, heading=#{unit["control_heading"]}, control_x=#{control_defaults[:x]}, control_y=#{control_defaults[:y]}, control_heading=#{control_defaults[:heading]} WHERE id=#{unit["id"]}");
+    end
+  end
+
+  def get_new_control_defaults(unit)
+    type = @db_connection.exec("SELECT * FROM Types WHERE name='#{unit["type"]}'")
+    type = type[0]
+    new_x = unit["control_x"].to_f + type["speed"].to_f
+    new_y = unit["control_y"].to_f + type["speed"].to_f
+
+    {x: new_x, y: new_y, heading: unit["heading"]}
+  end
+
+  def set_player_state(game_id, player_id, state, next_turn)
+    @db_connection.exec("UPDATE ActiveGames SET player_state='#{state}', state_updated=NOW(), turn=#{next_turn} WHERE game_id=#{game_id} AND player_id=#{player_id}")
+  end
+
+  def check_all_players_ready(game_id, game_turn)
+    players = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id='#{game_id}'")
+    all_ready = true
+    players.each do |player|
+      if (player["turn"] <= game_turn)
+        all_ready = false
+      end
+    end
+    all_ready
+  end
+
 
   def drop_tables()
     @db_connection.exec("DROP TABLE IF EXISTS Games")
@@ -151,10 +208,10 @@ class DroneTournament
   end
 
   def setup_tables()
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Games(id SERIAL, state VARCHAR(20), created TIMESTAMP)")
+    @db_connection.exec("CREATE TABLE IF NOT EXISTS Games(id SERIAL, state VARCHAR(20), turn INTEGER, max_turns INTEGER, created TIMESTAMP)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Players(id SERIAL, username VARCHAR(50))")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_id INTEGER, player_state VARCHAR(20), state_updated TIMESTAMP)")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Units(id SERIAL, game_id INTEGER, player_id INTEGER, armor FLOAT, x FLOAT, y FLOAT, heading FLOAT, energy FLOAT, type VARCHAR(30), team INTEGER)")
+    @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_id INTEGER, player_state VARCHAR(20), turn INTEGER, state_updated TIMESTAMP)")
+    @db_connection.exec("CREATE TABLE IF NOT EXISTS Units(id SERIAL, game_id INTEGER, player_id INTEGER, armor FLOAT, x FLOAT, y FLOAT, heading FLOAT, control_x FLOAT, control_y FLOAT, control_heading FLOAT, energy FLOAT, type VARCHAR(30), team INTEGER)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Types(id SERIAL, name VARCHAR(20), speed FLOAT, turn FLOAT, armor FLOAT, full_energy FLOAT, charge_energy FLOAT, image VARCHAR(20))")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Particles(id SERIAL, game_id INTEGER, team INTEGER, x FLOAT, y FLOAT, heading FLOAT, speed FLOAT, power FLOAT)")
     load_types()

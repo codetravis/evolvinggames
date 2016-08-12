@@ -48,8 +48,8 @@ post '/dronetournament/end_turn/:game_id' do
   json DroneTournament.new.end_turn(params['game_id'], move_requests["data"])
 end
 
-get '/dronetournament/next_turn/:game_id' do
-  json DroneTournament.new.next_turn(params['game_id'])
+get '/dronetournament/next_turn/:game_id/:player_id' do
+  json DroneTournament.new.next_turn(params['game_id'], params['player_id'])
 end
 
 post '/dronetournament/setup' do

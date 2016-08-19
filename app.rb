@@ -52,6 +52,10 @@ get '/dronetournament/next_turn/:game_id/:player_id' do
   json DroneTournament.new.next_turn(params['game_id'], params['player_id'])
 end
 
+get '/dronetournament/update_state/:game_id/:player_id' do
+  json DroneTournament.new.check_all_players_ready(params['game_id'], params['player_id'])
+end
+
 post '/dronetournament/setup' do
   json DroneTournament.new.setup_tables()
 end

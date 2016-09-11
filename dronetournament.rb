@@ -46,6 +46,7 @@ class DroneTournament
     current_game["units"] = get_units(game_id)
     current_game["players"] = get_players(game_id)
     current_game["types"] = get_types()
+    current_game["particles"] = get_particles(game_id)
     current_game["action"] = "Load Game"
     current_game
   end
@@ -63,6 +64,11 @@ class DroneTournament
   def get_types()
     types = @db_connection.exec("SELECT * FROM Types")
     types = types.to_a
+  end
+
+  def get_particles(game_id)
+    particles = @db_connection.exec("SELECT * FROM Particles WHERE game_id='#{game_id}'")
+    particles = particles.to_a
   end
 
   def create_new_game(player_id)
@@ -142,7 +148,6 @@ class DroneTournament
           move["y"] = 1
           move["heading"] = 1
         end
-        puts move
         @db_connection.exec("UPDATE Units SET control_x=#{move["control-x"]}, control_y=#{move["control-y"]}, control_heading=#{move["control-heading"]} WHERE player_id=#{player_id} AND id=#{move["unit_id"]}");
       end
     end
@@ -245,6 +250,7 @@ class DroneTournament
       if game["turn"].to_i < current_player["turn"].to_i
         next_turn = game["turn"].to_i + 1
         @db_connection.exec("UPDATE Games SET turn=#{next_turn} WHERE id=#{game_id}")
+        run_game_loop(game_id, 30)
         update_unit_positions(game_id)
       end
 
@@ -270,7 +276,7 @@ class DroneTournament
     @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_number INTEGER, player_id INTEGER, player_state VARCHAR(20), turn INTEGER, state_updated TIMESTAMP)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Units(id SERIAL, game_id INTEGER, player_id INTEGER, armor FLOAT, x FLOAT, y FLOAT, heading FLOAT, control_x FLOAT, control_y FLOAT, control_heading FLOAT, energy FLOAT, type VARCHAR(30), team INTEGER)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Types(id SERIAL, name VARCHAR(20), speed FLOAT, turn FLOAT, armor FLOAT, full_energy FLOAT, charge_energy FLOAT, image VARCHAR(20))")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Particles(id SERIAL, game_id INTEGER, team INTEGER, x FLOAT, y FLOAT, heading FLOAT, speed FLOAT, power FLOAT)")
+    @db_connection.exec("CREATE TABLE IF NOT EXISTS Particles(id SERIAL, game_id INTEGER, team INTEGER, x FLOAT, y FLOAT, heading FLOAT, speed FLOAT, power FLOAT, lifetime INTEGER, remove INTEGER)")
     load_types()
   end
 
@@ -282,4 +288,159 @@ class DroneTournament
     @db_connection.exec(types_statement)
   end
 
+
+  def run_game_loop(game_id, steps)
+    units = get_units(game_id)
+    particles = get_particles(game_id)
+
+    units.each do |unit|
+      unit["move_points"] = create_move_points(unit, steps)
+    end
+
+    radian_modifier = Math::PI/180
+    steps.to_i.times do
+      particles = get_particles(game_id)
+
+      units.each do |unit|
+        if (unit["armor"].to_i > 0)
+          type = get_type(unit["type"])
+          point = unit["move_points"].shift
+          unit["x"] = point[:x].to_f
+          unit["y"] = point[:y].to_f
+          unit["heading"] = point["heading"].to_f
+          unit["energy"] = unit["energy"].to_f + type["charge_energy"].to_f
+          if (unit["energy"].to_f >= type["full_energy"].to_f)
+            @db_connection.exec("INSERT INTO Particles (game_id, team, x, y, heading, speed, power, lifetime, remove) VALUES (#{game_id}, #{unit["team"]}, #{unit["x"]}, #{unit["y"]}, #{unit["heading"]}, 20, 1, 30, 0)")
+            unit["energy"] = 0
+            @db_connection.exec("UPDATE Units SET energy=0 WHERE id=#{unit["id"]}")
+          else
+            @db_connection.exec("UPDATE Units SET energy=#{unit["energy"]} WHERE id=#{unit["id"]}")
+          end
+
+        end
+      end
+
+
+      particles.each do |particle|
+        if (particle["remove"] != 1)
+          start_x = particle["x"].to_f
+          start_y = particle["y"].to_f
+
+          particle["x"] = start_x + (particle["speed"].to_f * Math.cos(particle["heading"].to_f * radian_modifier))
+          particle["y"] = start_y + (particle["speed"].to_f * Math.sin(particle["heading"].to_f * radian_modifier))
+
+          units.each do |unit|
+            if ( (unit["armor"].to_i > 0) &&
+                 (collided(particle, { x: start_x, y: start_y }, unit)) &&
+                 (particle["remove"].to_i != 1) )
+
+              unit_armor = unit["armor"].to_f - particle["power"].to_f
+
+              @db_connection.exec("UPDATE Units SET armor=#{unit_armor} WHERE id=#{unit["id"]}")
+
+              @db_connection.exec("UPDATE Particles SET remove=1 WHERE id=#{particle["id"]}")
+
+              particle["remove"] = 1
+
+            end
+          end
+
+          if (particle["lifetime"].to_i <= 0)
+            @db_connection.exec("UPDATE Particles SET remove=1 WHERE id=#{particle["id"]}")
+            particle["remove"] = 1
+          else
+            particle["lifetime"] = particle["lifetime"].to_i - 1
+            @db_connection.exec("UPDATE Particles SET lifetime=#{particle["lifetime"]}, x=#{particle["x"]}, y=#{particle["y"]} WHERE id=#{particle["id"]}")
+          end
+
+        end
+      end
+
+    end
+  end
+
+  def create_move_points(unit, steps)
+    type = get_type(unit["type"])
+    max_turn = type["turn"].to_f
+    distance = type["speed"].to_f/steps.to_f
+    radian_modifier = Math::PI/180
+    move_points = []
+    current_point = {x: unit["x"].to_f, y: unit["y"].to_f, heading: unit["heading"].to_f}
+    goal_heading = unit["control_heading"].to_f
+    new_heading = 0
+
+    steps.to_i.times do
+      start_heading = current_point[:heading]
+      next_heading = 0
+      if ((start_heading >= 0 && goal_heading >= 0) ||
+          (start_heading < 0 && goal_heading < 0))
+        if (start_heading > goal_heading)
+          next_heading = left_turn(start_heading, goal_heading, max_turn)
+        elsif (start_heading < goal_heading)
+          next_heading = right_turn(start_heading, goal_heading, max_turn)
+        else
+          next_heading = start_heading
+        end
+      elsif (start_heading >= 0 && goal_heading < 0)
+        if (start_heading - goal_heading > 180)
+          next_heading = start_heading + max_turn
+        else
+          next_heading = left_turn(start_heading, goal_heading, max_turn)
+        end
+      elsif (start_heading < 0 && goal_heading <= 0)
+        if (goal_heading - start_heading > 180)
+          next_heading = start_heading - max_turn
+        else
+          next_heading = right_turn(start_heading, goal_heading, max_turn)
+        end
+      end
+      next_x = current_point[:x] + (distance * Math.cos(next_heading * radian_modifier))
+      next_y = current_point[:y] + (distance * Math.sin(next_heading * radian_modifier))
+      current_point = {x: next_x, y: next_y, heading: next_heading }
+      move_points.push(current_point)
+    end
+    return move_points
+  end
+
+  def left_turn(start, goal, max)
+    return start - [start - goal, max].min
+  end
+
+  def right_turn(start, goal, max)
+    return start + [goal - start, max].min
+  end
+
+  def collided(particle, particle_start, unit)
+
+    particle_end = { x: particle["x"], y: particle["y"] }
+    top_left = { x: unit["x"] - 10, y: unit["y"] - 10 }
+    top_right = { x: unit["x"] + 10, y: unit["y"] - 10 }
+    bottom_left = { x: unit["x"] - 10, y: unit["y"] + 10 }
+    bottom_right = { x: unit["x"] + 10, y: unit["y"] + 10 }
+
+    if (particle["team"] == unit["team"])
+      return false
+    elsif ( lines_intersect(particle_start, particle_end, top_left, top_right) ||
+            lines_intersect(particle_start, particle_end, top_left, bottom_left) ||
+            lines_intersect(particle_start, particle_end, top_right, bottom_right) ||
+            lines_intersect(particle_start, particle_end, bottom_left, bottom_right) )
+      return true
+    else
+      return false
+    end
+  end
+
+  def lines_intersect(point_a, point_b, point_c, point_d)
+    abc = counterclockwise(point_a, point_b, point_c)
+    abd = counterclockwise(point_a, point_b, point_d)
+    cda = counterclockwise(point_c, point_d, point_a)
+    cdb = counterclockwise(point_c, point_d, point_b)
+
+    return  ( (abc != abd) && (cda != cdb) )
+  end
+
+  def counterclockwise(point_one, point_two, point_three)
+    return ( (point_three[:y] - point_one[:y]) * (point_two[:x] - point_one[:x]) >
+             (point_two[:y] - point_one[:y]) * (point_three[:x] - point_one[:x]) )
+  end
 end

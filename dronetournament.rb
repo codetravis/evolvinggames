@@ -143,11 +143,6 @@ class DroneTournament
       new_turn = current_player["turn"].to_i + 1
       set_player_state(game_id, player_id, 'finished', new_turn)
       move_requests["moves"].each do |move|
-        if move["x"] == "null"
-          move["x"] = 1
-          move["y"] = 1
-          move["heading"] = 1
-        end
         @db_connection.exec("UPDATE Units SET control_x=#{move["control-x"]}, control_y=#{move["control-y"]}, control_heading=#{move["control-heading"]} WHERE player_id=#{player_id} AND id=#{move["unit_id"]}");
       end
     end
@@ -177,18 +172,12 @@ class DroneTournament
       end
     end
 
-    puts "Now         : " + Time.now.to_i.to_s
-    puts "First Action: " + first_action.to_s
-    # if Time.now.to_i - first_action > 600
-    #   action = "Ready"
-    # end
-
     if action == "Ready"
       units = get_units(game_id)
       set_player_state(game_id, player_id, "updated", current_player["turn"])
     end
 
-    { action: action, units: units }
+    { action: action, units: units, player_state: current_player["player_state"] }
   end
 
   def update_unit_positions(game_id)
@@ -240,7 +229,9 @@ class DroneTournament
 
     action = "Update Ready"
     other_players.each do |player|
-      if (player["turn"] < current_player["turn"] || (player["turn"] == current_player["turn"] && player["player_state"] == "finished"))
+      puts "player turn #{player["turn"]}"
+      puts "this   turn #{current_player["turn"]}"
+      if (player["turn"].to_i < current_player["turn"].to_i || ((player["turn"].to_i == current_player["turn"].to_i) && (player["player_state"] == "finished")))
         action = "Update Waiting"
       end
     end
@@ -256,8 +247,8 @@ class DroneTournament
 
       set_player_state(game_id, player_id, 'plan', current_player["turn"])
     end
-
-    {action: action}
+    units = get_units(game_id)
+    {action: action, units: units}
   end
 
 

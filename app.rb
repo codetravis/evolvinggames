@@ -56,6 +56,11 @@ get '/dronetournament/update_state/:game_id/:player_id' do
   json DroneTournament.new.check_all_players_ready(params['game_id'], params['player_id'])
 end
 
+post '/dronetournament/move_points/:game_id/:player_id/:steps' do
+  move_requests = JSON.parse(request.body.read)
+  json DroneTournament.new.get_unit_move_points(params['game_id'], params['player_id'], params["steps"], move_requests["data"])
+end
+
 post '/dronetournament/setup' do
   json DroneTournament.new.setup_tables()
 end

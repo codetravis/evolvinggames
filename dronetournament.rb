@@ -67,12 +67,12 @@ class DroneTournament
     all_players = players.to_a
   end
 
-  def get_player(player_id)
+  def get_player(player_id, game_id)
     player = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_id=#{player_id} ")
     player = player[0]
   end
 
-  def get_other_players(player_id)
+  def get_other_players(player_id, game_id)
     other_players = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_id!=#{player_id} ")
     other_players = other_players.to_a
   end
@@ -94,9 +94,12 @@ class DroneTournament
     @db_connection.exec("INSERT INTO ActiveGames (game_id, player_number, player_id, player_state, turn, state_updated) VALUES ('#{game["id"]}', 2, 0, 'empty', 1, NOW())")
     unit_one_info = { game_id: game["id"], player_id: player_id, armor: 5, x: 100, y: 100,
                   heading: -30, energy: 0, type: "T-Fighter", team: 1}
-    unit_two_info = { game_id: game["id"], player_id: 0, armor: 2, x: 200, y: 250,
+    unit_two_info = { game_id: game["id"], player_id: 0, armor: 2, x: 300, y: 250,
                   heading: 30, energy: 0, type: "Eye-Fighter", team: 2}
+    turret_info = { game_id: game["id"], player_id: player_id, armor: 2, x: 100, y:275,
+                  heading: 0, energy: 0, type: "Single Turret", team: 1}
     create_new_unit(unit_one_info)
+    create_new_unit(turret_info)
     create_new_unit(unit_two_info)
     unit_two_info[:y] = 325
     create_new_unit(unit_two_info)
@@ -122,8 +125,7 @@ class DroneTournament
       game_id = 0
       empty_games.each do |game|
         game_id = game["game_id"]
-        puts game
-        puts game_id
+
         other_player = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_state!='empty'")
         if (other_player[0]["player_id"] == player_id)
           next
@@ -139,8 +141,8 @@ class DroneTournament
 
   def end_turn(game_id, move_requests)
     player_id = move_requests["player_id"]
-    current_player = get_player(player_id)
-    other_players = get_other_players(player_id)
+    current_player = get_player(player_id, game_id)
+    other_players = get_other_players(player_id, game_id)
 
     game = get_game(game_id)
 
@@ -169,8 +171,8 @@ class DroneTournament
   end
 
   def next_turn(game_id, player_id)
-    current_player = get_player(player_id)
-    other_players = get_other_players(player_id)
+    current_player = get_player(player_id, game_id)
+    other_players = get_other_players(player_id, game_id)
     game = get_game(game_id)
     action = "Ready"
     first_action = 0
@@ -223,8 +225,8 @@ class DroneTournament
   end
 
   def check_all_players_ready(game_id, player_id)
-    current_player = get_player(player_id)
-    other_players = get_other_players(player_id)
+    current_player = get_player(player_id, game_id)
+    other_players = get_other_players(player_id, game_id)
 
     action = "Update Ready"
     other_players.each do |other_player|
@@ -260,6 +262,7 @@ class DroneTournament
   end
 
   def setup_tables()
+    drop_tables()
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Games(id SERIAL, state VARCHAR(20), turn INTEGER, max_turns INTEGER, created TIMESTAMP)")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS Players(id SERIAL, username VARCHAR(50))")
     @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_number INTEGER, player_id INTEGER, player_state VARCHAR(20), turn INTEGER, state_updated TIMESTAMP)")
@@ -272,7 +275,8 @@ class DroneTournament
   def load_types()
     types_statement = "INSERT INTO Types (name, speed, turn, armor, full_energy, charge_energy, image) VALUES "
     types_statement += "('T-Fighter', 120, 4, 5, 100, 5, 't_fighter.png'), "
-    types_statement += "('Eye-Fighter', 90, 3, 2, 100, 4, 'eye_fighter.png') "
+    types_statement += "('Eye-Fighter', 90, 3, 2, 100, 4, 'eye_fighter.png'), "
+    types_statement += "('Single Turret', 0, 2, 3, 100, 10, 'single_turret.png')"
 
     @db_connection.exec(types_statement)
   end
@@ -288,14 +292,11 @@ class DroneTournament
       end
     end
 
-    particles = get_particles(game_id)
-
     units.each do |unit|
       unit["move_points"] = create_move_points(unit["id"], steps)
     end
 
-    steps.to_i.times do
-      particles = get_particles(game_id)
+    steps.to_i.times do |step_count|
 
       units.each do |unit|
         if (unit["armor"].to_i > 0)
@@ -304,11 +305,10 @@ class DroneTournament
           unit["x"] = point[:x].to_f
           unit["y"] = point[:y].to_f
           unit["heading"] = point[:heading].to_f
-          unit["energy"] = unit["energy"].to_f + type["charge_energy"].to_f
+          unit["energy"] = [unit["energy"].to_f + type["charge_energy"].to_f, type["full_energy"].to_f].min
           if (unit["energy"].to_f >= type["full_energy"].to_f)
             @db_connection.exec("INSERT INTO Particles (game_id, team, x, y, heading, speed, power, lifetime, remove) VALUES (#{game_id}, #{unit["team"]}, #{unit["x"].to_f}, #{unit["y"].to_f}, #{unit["heading"].to_f}, 20, 1, 30, 0)")
             unit["energy"] = 0
-            puts "created particle at #{unit["x"]}, #{unit["y"]}"
             @db_connection.exec("UPDATE Units SET energy=0 WHERE id=#{unit["id"]}")
           else
             @db_connection.exec("UPDATE Units SET energy=#{unit["energy"]} WHERE id=#{unit["id"]}")
@@ -317,7 +317,7 @@ class DroneTournament
         end
       end
 
-
+      particles = get_particles(game_id)
       particles.each do |particle|
         if (particle["remove"] != 1)
           start_x = particle["x"].to_f
@@ -331,9 +331,8 @@ class DroneTournament
                  (collided(particle, { x: start_x, y: start_y }, unit)) &&
                  (particle["remove"].to_i != 1) )
 
-              unit_armor = unit["armor"].to_f - particle["power"].to_f
-
-              @db_connection.exec("UPDATE Units SET armor=#{unit_armor} WHERE id=#{unit["id"]}")
+              unit["armor"] = unit["armor"].to_f - particle["power"].to_f
+              @db_connection.exec("UPDATE Units SET armor=#{unit["armor"]} WHERE id=#{unit["id"]}")
 
               @db_connection.exec("UPDATE Particles SET remove=1 WHERE id=#{particle["id"]}")
 
@@ -357,7 +356,6 @@ class DroneTournament
   end
 
   def get_unit_move_points(game_id, player_id, steps, move_requests)
-    puts move_requests
     move_requests["moves"].each do |move|
       @db_connection.exec("UPDATE Units SET control_x=#{move["control-x"]}, control_y=#{move["control-y"]}, control_heading=#{move["control-heading"]} WHERE player_id=#{player_id} AND id=#{move["unit_id"]}");
     end
@@ -367,6 +365,7 @@ class DroneTournament
     units.each do |unit|
       if unit["player_id"] == player_id
         move_points[unit["id"]] = create_move_points(unit["id"], steps.to_i)
+        @db_connection.exec("UPDATE Units SET control_x=#{move_points[unit["id"]][-1][:x]}, control_y=#{move_points[unit["id"]][-1][:y]}, control_heading=#{move_points[unit["id"]][-1][:heading]} WHERE player_id=#{player_id} AND id=#{unit["id"]}");
       end
     end
     {action: "Server Move Points", move_points: move_points}
@@ -374,56 +373,55 @@ class DroneTournament
 
   def create_move_points(unit_id, steps)
     unit = get_unit(unit_id)
-    puts unit
+
     type = get_type(unit["type"])
     max_turn = type["turn"].to_f
     distance = type["speed"].to_f/steps.to_f
     move_points = []
     current_point = {x: unit["x"].to_f, y: unit["y"].to_f, heading: unit["heading"].to_f}
-    puts current_point
-    puts unit["control_y"].to_f
-    puts unit["control_x"].to_f
+
     ydiff = unit["control_y"].to_f - unit["y"].to_f
     xdiff = unit["control_x"].to_f - unit["x"].to_f
-    puts "#{ydiff}, #{xdiff}"
+
     goal_heading = Math.atan2(ydiff, xdiff) * (180.0/Math::PI)
-    new_heading = 0
+    next_heading = 0
 
     steps.to_i.times do |i|
       start_heading = current_point[:heading].to_f
-      next_heading = 0
-      puts "step #{i}::headings - start: #{start_heading}, goal: #{goal_heading}"
-      if ((start_heading >= 0 && goal_heading >= 0) ||
-          (start_heading < 0 && goal_heading < 0))
-        if (start_heading > goal_heading)
-          next_heading = left_turn(start_heading, goal_heading, max_turn)
-        elsif (start_heading < goal_heading)
+
+      if (start_heading < 0)
+        start_heading = (start_heading.remainder(360.0)) + 360
+      else
+        start_heading = start_heading.remainder(360.0)
+      end
+
+      if (goal_heading < 0)
+        goal_heading = (goal_heading.remainder(360.0)) + 360
+      else
+        goal_heading = goal_heading.remainder(360.0)
+      end
+
+      if (start_heading > goal_heading)
+        if (start_heading - goal_heading < 180)
           next_heading = right_turn(start_heading, goal_heading, max_turn)
         else
-          next_heading = start_heading
-        end
-      elsif (start_heading >= 0 && goal_heading < 0)
-        puts "start > 0 and goal < 0"
-        if (start_heading - goal_heading > 180)
           next_heading = start_heading + max_turn
-        else
-          next_heading = left_turn(start_heading, goal_heading, max_turn)
         end
-      elsif (start_heading < 0 && goal_heading >= 0)
-        puts "start < 0 and goal > 0"
-        if (goal_heading - start_heading > 180)
-          next_heading = start_heading - max_turn
+      elsif (start_heading < goal_heading)
+        if (goal_heading - start_heading < 180)
+          next_heading = left_turn(start_heading, goal_heading, max_turn)
         else
-          next_heading = right_turn(start_heading, goal_heading, max_turn)
+          next_heading = start_heading - max_turn
         end
       else
-        puts "we did not catch a case"
         next_heading = start_heading
       end
+
       next_x = current_point[:x] + (distance * Math.cos(next_heading * @radian_modifier))
       next_y = current_point[:y] + (distance * Math.sin(next_heading * @radian_modifier))
-      current_point = {x: next_x, y: next_y, heading: next_heading }
-      goal_heading = Math.atan2(unit["control_y"].to_f - current_point[:y].to_f, unit["control_x"].to_f - current_point[:x].to_f) * (180.0/Math::PI)
+      current_point = {x: next_x, y: next_y, heading: (next_heading.remainder(360.0)) }
+
+      goal_heading = Math.atan2(unit["control_y"].to_f - next_y, unit["control_x"].to_f - next_x) * (180.0/Math::PI)
       move_points.push(current_point)
     end
 
@@ -431,11 +429,11 @@ class DroneTournament
   end
 
   def left_turn(start, goal, max)
-    return start - [(start - goal).abs, max].min
+    return start + [goal - start, max].min
   end
 
   def right_turn(start, goal, max)
-    return start + [(goal - start).abs, max].min
+    return start - [start - goal, max].min
   end
 
   def collided(particle, particle_start, unit)
@@ -452,7 +450,7 @@ class DroneTournament
             lines_intersect(particle_start, particle_end, top_left, bottom_left) ||
             lines_intersect(particle_start, particle_end, top_right, bottom_right) ||
             lines_intersect(particle_start, particle_end, bottom_left, bottom_right) )
-      puts "particle collision"
+       "particle collision with unit: #{unit["id"]}"
       return true
     else
       return false

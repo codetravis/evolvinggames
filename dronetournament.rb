@@ -1,5 +1,6 @@
 require 'pg'
 require 'date'
+require 'sinatra/activerecord'
 
 class DroneTournament
 

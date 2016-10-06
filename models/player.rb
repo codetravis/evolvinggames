@@ -1,3 +1,3 @@
-class Game < ActiveRecord::Base
+class Player < ActiveRecord::Base
 
 end

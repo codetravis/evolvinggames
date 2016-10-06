@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20161006015142) do
+ActiveRecord::Schema.define(version: 20161006015847) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -50,6 +50,26 @@ ActiveRecord::Schema.define(version: 20161006015142) do
     t.float   "full_energy"
     t.float   "charge_energy"
     t.string  "image_name"
+  end
+
+  create_table "units", force: :cascade do |t|
+    t.integer  "game_id"
+    t.integer  "player_id"
+    t.integer  "unit_type_id"
+    t.float    "armor"
+    t.float    "x"
+    t.float    "y"
+    t.float    "heading"
+    t.float    "control_x"
+    t.float    "control_y"
+    t.float    "control_heading"
+    t.float    "energy"
+    t.integer  "turn"
+    t.integer  "max_turn"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+    t.index ["game_id"], name: "index_units_on_game_id", using: :btree
+    t.index ["player_id"], name: "index_units_on_player_id", using: :btree
   end
 
 end

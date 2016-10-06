@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20161006015847) do
+ActiveRecord::Schema.define(version: 20161006022010) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -33,6 +33,21 @@ ActiveRecord::Schema.define(version: 20161006015847) do
     t.integer  "max_turn"
     t.datetime "created_at"
     t.datetime "updated_at"
+  end
+
+  create_table "particles", force: :cascade do |t|
+    t.integer  "game_id"
+    t.integer  "team"
+    t.float    "x"
+    t.float    "y"
+    t.float    "heading"
+    t.float    "speed"
+    t.integer  "power"
+    t.integer  "lifetime"
+    t.boolean  "remove"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+    t.index ["game_id"], name: "index_particles_on_game_id", using: :btree
   end
 
   create_table "players", force: :cascade do |t|

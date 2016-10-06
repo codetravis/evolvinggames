@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20161006013809) do
+ActiveRecord::Schema.define(version: 20161006015142) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -40,6 +40,16 @@ ActiveRecord::Schema.define(version: 20161006013809) do
     t.string   "password"
     t.datetime "created_at"
     t.datetime "updated_at"
+  end
+
+  create_table "unit_types", force: :cascade do |t|
+    t.string  "name"
+    t.float   "speed"
+    t.float   "turn"
+    t.integer "armor"
+    t.float   "full_energy"
+    t.float   "charge_energy"
+    t.string  "image_name"
   end
 
 end

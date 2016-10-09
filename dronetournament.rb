@@ -5,46 +5,43 @@ require 'sinatra/activerecord'
 class DroneTournament
 
   def initialize()
-      @db_connection = PG.connect(dbname: 'dronetournament')
       @radian_modifier = Math::PI/180.0
   end
 
-  def sign_in(username)
-    player = @db_connection.exec("SELECT * FROM Players WHERE username = '#{username}'")
-    if player.ntuples().zero?
-      player = @db_connection.exec("INSERT INTO Players (username) VALUES ('#{username}') RETURNING *")
+  def sign_in(username, password)
+    player = Player.where(username: username, password: password)
+    if player.nil?
+      player = Player.create(username: username, password: password)
     end
 
-    player = player[0]
-
-    { "action" => "Sign In", "player_id" => player["id"] }
+    { "action" => "Sign In", "player_id" => player.id}
   end
 
   def list_games(player_id)
-    games = @db_connection.exec("SELECT * FROM ActiveGames WHERE player_id='#{player_id}'")
-    if games.ntuples().zero?
+    games = ActiveGame.where(player_id: player_id)
+    if games.nil?
       create_new_game(player_id)
-      games = @db_connection.exec("SELECT * FROM ActiveGames WHERE player_id='#{player_id}'")
+      games = games = ActiveGame.where(player_id: player_id)
     end
 
     game_list = []
 
     games.each do |game|
-      opponent = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id='#{game["game_id"]}' AND player_id != '#{player_id}'")
-      if opponent.ntuples().zero?
+      opponent = games.where("game_id = ? and player_id != ?", game_id, player_id)
+      if opponent.nil?
         game["opponent"] = ""
       else
-        game["opponent"] = opponent[0]["player_id"]
+        game["opponent"] = opponent.player_id
       end
-      game_list.push(game)
+      game_list.push(game.to_a)
     end
 
     {"action" => "List Games", "games" => game_list}
   end
 
   def get_game(game_id)
-    game = @db_connection.exec("SELECT * FROM Games WHERE id='#{game_id}'")
-    current_game = game[0].to_h
+    game = Game.find(game_id)
+    current_game = game.to_h
     current_game["units"] = get_units(game_id)
     current_game["players"] = get_players(game_id)
     current_game["types"] = get_types()
@@ -54,85 +51,74 @@ class DroneTournament
   end
 
   def get_units(game_id)
-    units = @db_connection.exec("SELECT * FROM Units WHERE game_id='#{game_id}'")
-    all_units = units.to_a
+    units = Units.where(game_id: game_id)
+    units.to_a
   end
 
   def get_unit(unit_id)
-    unit = @db_connection.exec("SELECT * FROM Units WHERE id='#{unit_id}'")
-    unit = unit[0].to_h
+    unit = Unit.find(unit_id)
+    unit.to_h
   end
 
   def get_players(game_id)
-    players = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id='#{game_id}'")
-    all_players = players.to_a
+    players = ActiveGame.where(game_id: game_id)
+    players.to_a
   end
 
   def get_player(player_id, game_id)
-    player = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_id=#{player_id} ")
-    player = player[0]
+    player = ActiveGame.where(game_id: game_id, player_id: player_id)
   end
 
   def get_other_players(player_id, game_id)
-    other_players = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_id!=#{player_id} ")
-    other_players = other_players.to_a
+    other_players = ActiveGame.where("game_id = ? and player_id != ?", game_id, player_id)
+    other_players.to_a
   end
 
   def get_types()
-    types = @db_connection.exec("SELECT * FROM Types")
-    types = types.to_a
+    unit_types = UnitType.all()
+    unit_types = unit_types.to_a
   end
 
   def get_particles(game_id)
-    particles = @db_connection.exec("SELECT * FROM Particles WHERE game_id='#{game_id}'")
-    particles = particles.to_a
+    particles = Particle.where(game_id: game_id)
+    particles.to_a
   end
 
   def create_new_game(player_id)
-    game = @db_connection.exec("INSERT INTO Games (state, created, turn, max_turns) VALUES ('build', NOW(), 1, 30) RETURNING *")
-    game = game[0]
-    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_number, player_id, player_state, turn, state_updated) VALUES ('#{game["id"]}', 1, '#{player_id}', 'plan', 1, NOW())")
-    @db_connection.exec("INSERT INTO ActiveGames (game_id, player_number, player_id, player_state, turn, state_updated) VALUES ('#{game["id"]}', 2, 0, 'empty', 1, NOW())")
-    unit_one_info = { game_id: game["id"], player_id: player_id, armor: 5, x: 100, y: 100,
-                  heading: -30, energy: 0, type: "T-Fighter", team: 1}
-    unit_two_info = { game_id: game["id"], player_id: 0, armor: 2, x: 300, y: 250,
-                  heading: 30, energy: 0, type: "Eye-Fighter", team: 2}
-    turret_info = { game_id: game["id"], player_id: player_id, armor: 2, x: 100, y:275,
-                  heading: 0, energy: 0, type: "Single Turret", team: 1}
-    create_new_unit(unit_one_info)
-    create_new_unit(turret_info)
-    create_new_unit(unit_two_info)
+    game = Game.create(state: 'build', turn: 1, max_turns: 30)
+    player_one = ActiveGame.create(game_id: game.id, player_number: 1, player_id: player_id, player_state: plan, turn: 1)
+    player_two = ActiveGame.create(game_id: game.id, player_number: 2, player_id: 0, player_state: 'empty', turn: 1)
+
+    # TODO get these hashes matching new unit table schema
+    unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 100, y: 100,
+                  heading: -30, energy: 0, type: "T-Fighter", team: 1, control_x: 100, control_y: 100, control_heading: -30}
+    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 300, y: 250,
+                  heading: 30, energy: 0, type: "Eye-Fighter", team: 2, control_x: 100, control_y: 100, control_heading: -30}
+    turret_info = { game_id: game.id, player_id: player_id, armor: 2, x: 100, y:275,
+                  heading: 0, energy: 0, type: "Single Turret", team: 1, control_x: 100, control_y: 100, control_heading: -30}
+
+    Unit.create(unit_one_info)
+    Unit.create(turret_info)
+    Unit.create(unit_two_info)
     unit_two_info[:y] = 325
-    create_new_unit(unit_two_info)
+    unit_two_info[:control_y] = 325
+    Unit.create(unit_two_info)
     game
   end
 
-  def create_new_unit(unit_info)
-    insert_statement = "INSERT INTO Units (game_id, player_id, armor, x, y, heading, control_x, control_y, control_heading, energy, type, team) "
-    insert_statement += "VALUES (#{unit_info[:game_id]}, #{unit_info[:player_id]}, #{unit_info[:armor]}, " +
-      "#{unit_info[:x]}, #{unit_info[:y]}, #{unit_info[:heading]}, " +
-      "#{unit_info[:x]}, #{unit_info[:y]}, #{unit_info[:heading]}, " +
-      "#{unit_info[:energy]}, '#{unit_info[:type]}', #{unit_info[:team]}) "
-    insert_statement += "RETURNING *"
-    new_unit = @db_connection.exec(insert_statement)
-    new_unit = new_unit[0]
-  end
-
   def join_game(player_id)
-    empty_games = @db_connection.exec("SELECT * FROM ActiveGames WHERE player_state='empty'")
-    if empty_games.ntuples().zero?
+    empty_games = ActiveGame.where(player_state: 'empty')
+    if empty_games.nil?
       list_games(player_id)
     else
       game_id = 0
       empty_games.each do |game|
-        game_id = game["game_id"]
-
-        other_player = @db_connection.exec("SELECT * FROM ActiveGames WHERE game_id=#{game_id} AND player_state!='empty'")
-        if (other_player[0]["player_id"] == player_id)
+        other_player = ActiveGame.where("game_id = ? and player_state != ?", game.id, 'empty')
+        if (other_player.first.player_id == player_id)
           next
         else
-          new_player = @db_connection.exec("UPDATE ActiveGames SET player_id=#{player_id}, player_state='plan' WHERE game_id=#{game_id} AND player_state='empty' RETURNING *")
-          @db_connection.exec("UPDATE Units SET player_id=#{player_id} WHERE game_id=#{game_id} AND player_id=0")
+          new_player = game.update(player_id: player_id, player_state: 'plan')
+          Unit.where(game_id: game.id, player_id: 0).update(player_id: player_id)
           break
         end
       end
@@ -204,12 +190,13 @@ class DroneTournament
     units = get_units(game_id)
     units.each do |unit|
       control_defaults = get_new_control_defaults(unit)
-      @db_connection.exec("UPDATE Units SET x=#{unit["control_x"]}, y=#{unit["control_y"]}, heading=#{unit["control_heading"]}, control_x=#{control_defaults[:x]}, control_y=#{control_defaults[:y]}, control_heading=#{control_defaults[:heading]} WHERE id=#{unit["id"]}");
+      Unit.find(unit[:id]).update(x: unit.control_x, y: unit.control_y, heading: unit.control_heading, control_x: control_defaults[:x], control_y: control_defaults[:y], control_heading: control_defaults[:heading])
     end
   end
 
   def get_new_control_defaults(unit)
-    type = get_type(unit["type"])
+    # TODO get unit type through active record
+    unit_type = get_type(unit["type"])
     new_x = unit["control_x"].to_f + (type["speed"].to_f * Math.cos(unit["control_heading"].to_f * @radian_modifier))
     new_y = unit["control_y"].to_f + (type["speed"].to_f * Math.sin(unit["control_heading"].to_f * @radian_modifier))
 
@@ -222,7 +209,7 @@ class DroneTournament
   end
 
   def set_player_state(game_id, player_id, state, next_turn)
-    @db_connection.exec("UPDATE ActiveGames SET player_state='#{state}', state_updated=NOW(), turn=#{next_turn} WHERE game_id=#{game_id} AND player_id=#{player_id}")
+    ActiveGame.where(game_id: game_id, player_id: player_id).update(player_state: state, turn: next_turn)
   end
 
   def check_all_players_ready(game_id, player_id)
@@ -241,7 +228,7 @@ class DroneTournament
       game = get_game(game_id)
       if game["turn"].to_i < current_player["turn"].to_i
         next_turn = game["turn"].to_i + 1
-        @db_connection.exec("UPDATE Games SET turn=#{next_turn} WHERE id=#{game_id}")
+        Game.find(game_id).update(turn: next_turn)
         run_game_loop(game_id, 30)
         update_unit_positions(game_id)
       end
@@ -252,34 +239,15 @@ class DroneTournament
     {action: action, units: units}
   end
 
-
-  def drop_tables()
-    @db_connection.exec("DROP TABLE IF EXISTS Games")
-    @db_connection.exec("DROP TABLE IF EXISTS Players")
-    @db_connection.exec("DROP TABLE IF EXISTS ActiveGames")
-    @db_connection.exec("DROP TABLE IF EXISTS Units")
-    @db_connection.exec("DROP TABLE IF EXISTS Types")
-    @db_connection.exec("DROP TABLE IF EXISTS Particles")
-  end
-
-  def setup_tables()
-    drop_tables()
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Games(id SERIAL, state VARCHAR(20), turn INTEGER, max_turns INTEGER, created TIMESTAMP)")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Players(id SERIAL, username VARCHAR(50))")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS ActiveGames(game_id INTEGER, player_number INTEGER, player_id INTEGER, player_state VARCHAR(20), turn INTEGER, state_updated TIMESTAMP)")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Units(id SERIAL, game_id INTEGER, player_id INTEGER, armor FLOAT, x FLOAT, y FLOAT, heading FLOAT, control_x FLOAT, control_y FLOAT, control_heading FLOAT, energy FLOAT, type VARCHAR(30), team INTEGER)")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Types(id SERIAL, name VARCHAR(20), speed FLOAT, turn FLOAT, armor FLOAT, full_energy FLOAT, charge_energy FLOAT, image VARCHAR(20))")
-    @db_connection.exec("CREATE TABLE IF NOT EXISTS Particles(id SERIAL, game_id INTEGER, team INTEGER, x FLOAT, y FLOAT, heading FLOAT, speed FLOAT, power FLOAT, lifetime INTEGER, remove INTEGER)")
-    load_types()
-  end
-
   def load_types()
-    types_statement = "INSERT INTO Types (name, speed, turn, armor, full_energy, charge_energy, image) VALUES "
-    types_statement += "('T-Fighter', 120, 4, 5, 100, 5, 't_fighter.png'), "
-    types_statement += "('Eye-Fighter', 90, 3, 2, 100, 4, 'eye_fighter.png'), "
-    types_statement += "('Single Turret', 0, 2, 3, 100, 10, 'single_turret.png')"
+    t_fighter = UnitType.new(name: "T-Fighter", speed: 120, turn: 4, armor: 5, full_energy: 100, charge_energy: 5, image_name: "t_fighter.png")
+    t_fighter.save
 
-    @db_connection.exec(types_statement)
+    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 90, turn: 3, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
+    eye_fighter.save
+
+    single_turret = UnitType.new(name: "Single Turret", speed: 0, turn: 2, armor: 3, full_energy: 100, charge_energy: 10, image_name: "single_turret.png")
+    single_turret.save
   end
 
 
@@ -289,7 +257,7 @@ class DroneTournament
 
     particles.each do |particle|
       if particle["remove"].to_i == 1
-        @db_connection.exec("DELETE FROM Particles WHERE id=#{particle["id"]}")
+        Particle.find(particle["id"]).destroy
       end
     end
 
@@ -308,11 +276,13 @@ class DroneTournament
           unit["heading"] = point[:heading].to_f
           unit["energy"] = [unit["energy"].to_f + type["charge_energy"].to_f, type["full_energy"].to_f].min
           if (unit["energy"].to_f >= type["full_energy"].to_f)
-            @db_connection.exec("INSERT INTO Particles (game_id, team, x, y, heading, speed, power, lifetime, remove) VALUES (#{game_id}, #{unit["team"]}, #{unit["x"].to_f}, #{unit["y"].to_f}, #{unit["heading"].to_f}, 20, 1, 30, 0)")
+
+            Particle.create(game_id: game_id, team: unit["team"], x: unit["x"].to_f, y: unit["y"].to_f, heading: unit["heading"].to_f, speed: 20, power: 1, lifetime: 30, remove: 0)
+
             unit["energy"] = 0
-            @db_connection.exec("UPDATE Units SET energy=0 WHERE id=#{unit["id"]}")
+            Unit.find(unit["id"]).update(energy: 0)
           else
-            @db_connection.exec("UPDATE Units SET energy=#{unit["energy"]} WHERE id=#{unit["id"]}")
+            Unit.find(unit["id"]).update(energy: unit["energy"])
           end
 
         end
@@ -333,9 +303,9 @@ class DroneTournament
                  (particle["remove"].to_i != 1) )
 
               unit["armor"] = unit["armor"].to_f - particle["power"].to_f
-              @db_connection.exec("UPDATE Units SET armor=#{unit["armor"]} WHERE id=#{unit["id"]}")
 
-              @db_connection.exec("UPDATE Particles SET remove=1 WHERE id=#{particle["id"]}")
+              Unit.find(unit["id"]).update(armor: unit["armor"])
+              Particle.find(particle["id"]).update(remove: 1)
 
               particle["remove"] = 1
 
@@ -343,11 +313,11 @@ class DroneTournament
           end
 
           if (particle["lifetime"].to_i <= 0)
-            @db_connection.exec("UPDATE Particles SET remove=1 WHERE id=#{particle["id"]}")
+            Particle.find(particle["id"]).update(remove: 1)
             particle["remove"] = 1
           else
             particle["lifetime"] = particle["lifetime"].to_i - 1
-            @db_connection.exec("UPDATE Particles SET lifetime=#{particle["lifetime"]}, x=#{particle["x"]}, y=#{particle["y"]} WHERE id=#{particle["id"]}")
+            Particle.find(particle["id"]).update(lifetime: particle["lifetime"], x: particle["x"], y: particle["y"])
           end
 
         end

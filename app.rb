@@ -24,8 +24,8 @@ get '/' do
   erb :home
 end
 
-post '/dronetournament/sign_in/:username' do
-  json DroneTournament.new.sign_in(params['username'])
+post '/dronetournament/sign_in' do
+  json DroneTournament.new.sign_in(params['username'], params['password'])
 end
 
 get '/dronetournament/games/:player_id' do
@@ -63,7 +63,7 @@ post '/dronetournament/move_points/:game_id/:player_id/:steps' do
 end
 
 post '/dronetournament/setup' do
-  json DroneTournament.new.setup_tables()
+  json DroneTournament.new.load_types()
 end
 
 post '/dronetournament/new_game/:player_id' do
@@ -72,8 +72,4 @@ end
 
 post '/dronetournament/join_game/:player_id' do
   json DroneTournament.new.join_game(params["player_id"])
-end
-
-delete '/dronetournament/destroy' do
-  json DroneTournament.new.drop_tables()
 end

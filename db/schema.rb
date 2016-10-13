@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20161006022627) do
+ActiveRecord::Schema.define(version: 20161011221104) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -81,6 +81,7 @@ ActiveRecord::Schema.define(version: 20161006022627) do
     t.float    "energy"
     t.datetime "created_at"
     t.datetime "updated_at"
+    t.integer  "team"
     t.index ["game_id"], name: "index_units_on_game_id", using: :btree
     t.index ["player_id"], name: "index_units_on_player_id", using: :btree
   end

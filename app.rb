@@ -20,12 +20,17 @@ options '*' do
   200
 end
 
+after do
+  ActiveRecord::Base.clear_active_connections!
+end
+
 get '/' do
   erb :home
 end
 
 post '/dronetournament/sign_in' do
-  json DroneTournament.new.sign_in(params['username'], params['password'])
+  signin_params = JSON.parse(request.body.read)
+  json DroneTournament.new.sign_in(signin_params['username'], signin_params['password'])
 end
 
 get '/dronetournament/games/:player_id' do

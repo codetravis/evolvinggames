@@ -11,5 +11,5 @@ production:
   encoding: unicode
   database: dronetournament
   pool: 50
-  username: test
-  password: test_password
+  username: production
+  password: unguessable

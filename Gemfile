@@ -2,7 +2,7 @@ source 'http://rubygems.org'
 ruby "2.2.3"
 gem 'sinatra'
 gem 'sinatra-contrib'
-gem 'thin'
+gem 'puma'
 gem 'pg'
 gem 'sinatra-cross_origin'
 gem 'activerecord'

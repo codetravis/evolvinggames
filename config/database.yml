@@ -11,5 +11,5 @@ production:
   encoding: unicode
   database: dronetournament
   pool: 50
-  username: production
-  password: unguessable
+  username: <%= ENV['PG_USER'] %>
+  password: <%= ENV['PG_PASS'] %>

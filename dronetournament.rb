@@ -2,7 +2,6 @@ require 'pg'
 require 'date'
 require 'sinatra/activerecord'
 Dir["./models/*.rb"].each {|file| require file }
-ActiveRecord::Base.establish_connection(ENV['DATABASE_URL'] || 'postgres://localhost/dronetournament')
 
 class DroneTournament
 

@@ -17,7 +17,8 @@ set :expose_headers, ['Content-Type']
 
 options '*' do
   response.headers['Allow'] = "GET,POST,PUT,DELETE,OPTIONS"
-  response.headers['Access-Control-Allow-Headers'] = "X-Requested-With, X-HTTP-Method-Override, Content-Type, Cache-Control, Accept"
+  response.headers['Access-Control-Allow-Headers'] = "Origin, X-Requested-With, X-HTTP-Method-Override, Content-Type, Cache-Control, Accept"
+  response.headers['Access-Control-Request-Method'] = '*'
   200
 end
 

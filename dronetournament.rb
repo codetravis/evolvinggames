@@ -1,6 +1,7 @@
 require 'pg'
 require 'date'
 require 'sinatra/activerecord'
+require 'bcrypt'
 Dir["./models/*.rb"].each {|file| require file }
 
 class DroneTournament
@@ -10,12 +11,16 @@ class DroneTournament
   end
 
   def sign_in(username, password)
-    player = Player.where(username: username, password: password).first
+    player = Player.where(username: username).first
     if player.nil?
-      player = Player.create(username: username, password: password)
+      password_salt = BCrypt::Engine.generate_salt
+      password_hash = BCrypt::Engine.hash_secret(password, password_salt)
+      player = Player.create(username: username, password: password_hash, salt: password_salt)
+    elsif (BCrypt::Engine.hash_secret(password, player[:salt]) == player[:password])
+      { "action" => "Sign In", "player_id" => player.id.to_s }
+    else
+      { "action" => "Invalid Sign In", "message" => "Username already taken and password incorrect" }
     end
-    puts player
-    { "action" => "Sign In", "player_id" => player.id.to_s}
   end
 
   def list_games(player_id)
@@ -78,18 +83,24 @@ class DroneTournament
     player_two = ActiveGame.create(game_id: game.id, player_number: 2, player_id: 0, player_state: 'empty', player_turn: 1)
 
     types = UnitType.all()
-    unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 100, y: 100,
-                  heading: -30, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
-    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 300, y: 250,
-                  heading: 30, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 2, control_x: 100, control_y: 100, control_heading: -30}
-    turret_info = { game_id: game.id, player_id: player_id, armor: 2, x: 100, y:275,
-                  heading: 0, energy: 0, unit_type_id: types.where(name: "Single Turret").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
+    unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 10, y: 10,
+                  heading: 270, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
+    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 100, y: 10,
+                  heading: 270, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
 
     Unit.create(unit_one_info)
-    Unit.create(turret_info)
     Unit.create(unit_two_info)
-    unit_two_info[:y] = 325
-    unit_two_info[:control_y] = 325
+    unit_one_info[:x] = 400
+    unit_one_info[:y] = 400
+    unit_one_info[:heading] = 90
+    unit_one_info[:player_id] = 0
+    unit_one_info[:team] = 2
+    Unit.create(unit_one_info)
+    unit_two_info[:x] = 400
+    unit_two_info[:y] = 400
+    unit_two_info[:heading] = 90
+    unit_two_info[:player_id] = 0
+    unit_two_info[:team] = 2
     Unit.create(unit_two_info)
     game
   end
@@ -224,10 +235,10 @@ class DroneTournament
   end
 
   def load_types()
-    t_fighter = UnitType.new(name: "T-Fighter", speed: 120, turn: 4, armor: 5, full_energy: 100, charge_energy: 5, image_name: "t_fighter.png")
+    t_fighter = UnitType.new(name: "T-Fighter", speed: 100, turn: 4, armor: 6, full_energy: 100, charge_energy: 6, image_name: "t_fighter.png")
     t_fighter.save
 
-    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 90, turn: 3, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
+    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 120, turn: 5, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
     eye_fighter.save
 
     single_turret = UnitType.new(name: "Single Turret", speed: 0, turn: 2, armor: 3, full_energy: 100, charge_energy: 10, image_name: "single_turret.png")

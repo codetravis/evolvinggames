@@ -16,6 +16,7 @@ class DroneTournament
       password_salt = BCrypt::Engine.generate_salt
       password_hash = BCrypt::Engine.hash_secret(password, password_salt)
       player = Player.create(username: username, password: password_hash, salt: password_salt)
+      { "action" => "Sign In", "player_id" => player.id.to_s }
     elsif (BCrypt::Engine.hash_secret(password, player[:salt]) == player[:password])
       { "action" => "Sign In", "player_id" => player.id.to_s }
     else
@@ -24,23 +25,46 @@ class DroneTournament
   end
 
   def list_games(player_id)
-    puts "listing games"
-    games = Player.find(player_id).active_games
-    if games.empty?
+    removed_finished_games(player_id)
+
+    active_games = Player.find(player_id).active_games
+    if active_games.empty?
       create_new_game(player_id)
-      games = Player.find(player_id).active_games
+      active_games = Player.find(player_id).active_games
     end
 
-    puts games.to_a
-    {"action" => "List Games", "games" => games.to_a}
+    puts active_games.to_a
+    {"action" => "List Games", "games" => active_games.to_a}
+  end
+
+  def remove_finished_games(player_id)
+    active_games = Player.find(player_id).active_games
+
+    if !active_games.empty?
+      active_games.each do |active_game|
+
+        if (active_game.units.where("armor > 0 AND player_id = ?", player_id).count = 0) ||
+           (active_game.units.where("armor > 0 AND player_id != ?", player_id).count = 0)
+          game = Game.find(active_game.game_id)
+
+          game.units.each do |unit|
+            unit.destroy
+          end
+
+          game.active_games.each do |a_game|
+            a_game.destroy
+          end
+        end
+
+      end
+    end
+
   end
 
   def get_game(game_id)
     game = Game.find(game_id)
     current_game = game.serializable_hash
     current_game["units"] = get_units(game_id)
-    puts "show all units for game"
-    puts current_game["units"]
     current_game["players"] = get_players(game_id)
     current_game["types"] = get_types()
     current_game["particles"] = get_particles(game_id)
@@ -84,23 +108,17 @@ class DroneTournament
 
     types = UnitType.all()
     unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 10, y: 10,
-                  heading: 270, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
-    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 100, y: 10,
-                  heading: 270, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 100, control_y: 100, control_heading: -30}
+                  heading: 270, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 10, control_y: 100, control_heading: 270}
+    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 50, y: 10,
+                  heading: 270, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 50, control_y: 100, control_heading: 270}
 
     Unit.create(unit_one_info)
     Unit.create(unit_two_info)
-    unit_one_info[:x] = 400
-    unit_one_info[:y] = 400
-    unit_one_info[:heading] = 90
-    unit_one_info[:player_id] = 0
-    unit_one_info[:team] = 2
+    unit_one_info.merge { x: 400, y: 400, heading: 90, player_id: 0, team: 2,
+      control_x: 400, control_y: 300, control_heading: 90 }
     Unit.create(unit_one_info)
-    unit_two_info[:x] = 400
-    unit_two_info[:y] = 400
-    unit_two_info[:heading] = 90
-    unit_two_info[:player_id] = 0
-    unit_two_info[:team] = 2
+    unit_two_info.merge { x: 440, y: 400, heading: 90, player_id: 0, team: 2,
+      control_x: 440, control_y: 300, control_heading: 90 }
     Unit.create(unit_two_info)
     game
   end
@@ -112,7 +130,7 @@ class DroneTournament
     else
       game_id = 0
       empty_games.each do |activegame|
-        other_player = ActiveGame.where("game_id = ? and player_state != ?", activegame.game_id, 'empty')
+        other_player = ActiveGame.where("game_id = ? and player_state != 'empty'", activegame.game_id)
         if (other_player.first.player_id == player_id.to_i)
           next
         else
@@ -122,7 +140,12 @@ class DroneTournament
           break
         end
       end
-      get_game(game_id)
+
+      if game_id == 0
+        list_games(player_id)
+      else
+        get_game(game_id)
+      end
     end
   end
 
@@ -235,10 +258,10 @@ class DroneTournament
   end
 
   def load_types()
-    t_fighter = UnitType.new(name: "T-Fighter", speed: 100, turn: 4, armor: 6, full_energy: 100, charge_energy: 6, image_name: "t_fighter.png")
+    t_fighter = UnitType.new(name: "T-Fighter", speed: 100, turn: 5, armor: 6, full_energy: 100, charge_energy: 6, image_name: "t_fighter.png")
     t_fighter.save
 
-    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 120, turn: 5, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
+    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 120, turn: 4, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
     eye_fighter.save
 
     single_turret = UnitType.new(name: "Single Turret", speed: 0, turn: 2, armor: 3, full_energy: 100, charge_energy: 10, image_name: "single_turret.png")

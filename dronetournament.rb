@@ -25,7 +25,7 @@ class DroneTournament
   end
 
   def list_games(player_id)
-    removed_finished_games(player_id)
+    remove_finished_games(player_id)
 
     active_games = Player.find(player_id).active_games
     if active_games.empty?
@@ -38,14 +38,14 @@ class DroneTournament
   end
 
   def remove_finished_games(player_id)
-    active_games = Player.find(player_id).active_games
+    player_games = Player.find(player_id).active_games
 
-    if !active_games.empty?
-      active_games.each do |active_game|
-
-        if (active_game.units.where("armor > 0 AND player_id = ?", player_id).count = 0) ||
-           (active_game.units.where("armor > 0 AND player_id != ?", player_id).count = 0)
-          game = Game.find(active_game.game_id)
+    if !player_games.empty?
+      player_games.each do |player_game|
+        player_units = Unit.where("armor > 0 AND player_id = ? AND game_id = ?", player_id, player_game.game_id)
+        enemy_units = Unit.where("armor > 0 AND player_id != ? AND game_id = ?", player_id, player_game.game_id)
+        if (player_units.count == 0) || (enemy_units.count == 0)
+          game = Game.find(player_game.game_id)
 
           game.units.each do |unit|
             unit.destroy
@@ -97,7 +97,7 @@ class DroneTournament
   end
 
   def get_particles(game_id)
-    particles = Particle.where(game_id: game_id)
+    particles = Particle.where(game_id: game_id, remove: 0)
     particles.to_a
   end
 
@@ -107,18 +107,18 @@ class DroneTournament
     player_two = ActiveGame.create(game_id: game.id, player_number: 2, player_id: 0, player_state: 'empty', player_turn: 1)
 
     types = UnitType.all()
-    unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 10, y: 10,
-                  heading: 270, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 10, control_y: 100, control_heading: 270}
-    unit_two_info = { game_id: game.id, player_id: 0, armor: 2, x: 50, y: 10,
-                  heading: 270, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 50, control_y: 100, control_heading: 270}
+    unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 30, y: 30,
+                  heading: 90, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 30, control_y: 100, control_heading: 90}
+    unit_two_info = { game_id: game.id, player_id: player_id, armor: 2, x: 70, y: 30,
+                  heading: 90, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 70, control_y: 100, control_heading: 90}
 
     Unit.create(unit_one_info)
     Unit.create(unit_two_info)
-    unit_one_info.merge { x: 400, y: 400, heading: 90, player_id: 0, team: 2,
-      control_x: 400, control_y: 300, control_heading: 90 }
+    unit_one_info.merge!({ x: 400, y: 400, heading: 270, player_id: 0, team: 2,
+      control_x: 400, control_y: 300, control_heading: 270 })
     Unit.create(unit_one_info)
-    unit_two_info.merge { x: 440, y: 400, heading: 90, player_id: 0, team: 2,
-      control_x: 440, control_y: 300, control_heading: 90 }
+    unit_two_info.merge!({ x: 440, y: 400, heading: 270, player_id: 0, team: 2,
+      control_x: 440, control_y: 300, control_heading: 270 })
     Unit.create(unit_two_info)
     game
   end
@@ -236,7 +236,7 @@ class DroneTournament
 
     action = "Update Ready"
     other_players.each do |other_player|
-      if other_player["player_turn"].to_i < current_player["player_turn"].to_i ||
+      if (other_player["player_turn"].to_i < current_player["player_turn"].to_i) ||
         (other_player["player_turn"].to_i == current_player["player_turn"].to_i && other_player["player_state"] == "finished")
         action = "Update Waiting"
       end
@@ -246,9 +246,9 @@ class DroneTournament
       game = get_game(game_id)
       if game["turn"].to_i < current_player["player_turn"].to_i
         next_turn = game["turn"].to_i + 1
-        Game.find(game_id).update(turn: next_turn)
         run_game_loop(game_id, 30)
         update_unit_positions(game_id)
+        Game.find(game_id).update(turn: next_turn)
       end
 
       set_player_state(game_id, player_id, 'plan', current_player["player_turn"])
@@ -272,11 +272,9 @@ class DroneTournament
   def run_game_loop(game_id, steps)
     units = get_units(game_id)
     particles = get_particles(game_id)
-
-    particles.each do |particle|
-      if particle.remove == 1
-        particle.destroy
-      end
+    remove_particles = Particle.where(game_id: game_id, remove: 1)
+    remove_particles.each do |particle|
+      particle.destroy
     end
     move_points = {}
     units.each do |unit|
@@ -326,6 +324,7 @@ class DroneTournament
               Particle.find(particle.id).update(remove: 1)
 
               particle.remove = 1
+              break
 
             end
           end
@@ -416,7 +415,6 @@ class DroneTournament
       goal_heading = Math.atan2(unit.control_y - next_y, unit.control_x - next_x) * (180.0/Math::PI)
       move_points.push(current_point)
     end
-    puts move_points
     move_points
   end
 
@@ -442,7 +440,6 @@ class DroneTournament
             lines_intersect(particle_start, particle_end, top_left, bottom_left) ||
             lines_intersect(particle_start, particle_end, top_right, bottom_right) ||
             lines_intersect(particle_start, particle_end, bottom_left, bottom_right) )
-       "particle collision with unit: #{unit["id"]}"
       return true
     else
       return false

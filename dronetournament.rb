@@ -8,6 +8,7 @@ class DroneTournament
 
   def initialize()
       @radian_modifier = Math::PI/180.0
+      @version = "0.1"
   end
 
   def sign_in(username, password)
@@ -66,7 +67,7 @@ class DroneTournament
     current_game = game.serializable_hash
     current_game["units"] = get_units(game_id)
     current_game["players"] = get_players(game_id)
-    current_game["types"] = get_types()
+    current_game["types"] = get_types(game.version)
     current_game["particles"] = get_particles(game_id)
     current_game["action"] = "Load Game"
     current_game
@@ -91,8 +92,8 @@ class DroneTournament
     other_players.to_a
   end
 
-  def get_types()
-    unit_types = UnitType.all()
+  def get_types(version)
+    unit_types = UnitType.where(version: version)
     unit_types = unit_types.to_a
   end
 
@@ -102,15 +103,15 @@ class DroneTournament
   end
 
   def create_new_game(player_id)
-    game = Game.create(state: 'build', turn: 1, max_turn: 30)
+    game = Game.create(state: 'build', turn: 1, max_turn: 30, version: @version)
     player_one = ActiveGame.create(game_id: game.id, player_number: 1, player_id: player_id, player_state: 'plan', player_turn: 1)
     player_two = ActiveGame.create(game_id: game.id, player_number: 2, player_id: 0, player_state: 'empty', player_turn: 1)
 
     types = UnitType.all()
     unit_one_info = { game_id: game.id, player_id: player_id, armor: 5, x: 30, y: 30,
-                  heading: 90, energy: 0, unit_type_id: types.where(name: "T-Fighter").first.id, team: 1, control_x: 30, control_y: 100, control_heading: 90}
+                  heading: 90, energy: 0, unit_type_id: types.where(name: "T-Fighter", version: @version).first.id, team: 1, control_x: 30, control_y: 100, control_heading: 90}
     unit_two_info = { game_id: game.id, player_id: player_id, armor: 2, x: 70, y: 30,
-                  heading: 90, energy: 0, unit_type_id: types.where(name: "Eye-Fighter").first.id, team: 1, control_x: 70, control_y: 100, control_heading: 90}
+                  heading: 90, energy: 0, unit_type_id: types.where(name: "Eye-Fighter", version: @version).first.id, team: 1, control_x: 70, control_y: 100, control_heading: 90}
 
     Unit.create(unit_one_info)
     Unit.create(unit_two_info)
@@ -153,38 +154,35 @@ class DroneTournament
     player_id = move_requests["player_id"]
     current_player = get_player(player_id, game_id)
     other_players = get_other_players(player_id, game_id)
-    puts current_player
-    puts other_players
-    game = get_game(game_id)
+    game = Game.find(game_id)
 
     action = "Turn Ended"
     other_players.each do |other_player|
       if other_player["player_turn"].to_i < current_player["player_turn"].to_i ||
-          (other_player["player_turn"].to_i == current_player["player_turn"].to_i && other_player["player_state"] == 'finished')
+          (other_player["player_turn"].to_i == current_player["player_turn"].to_i &&
+           other_player["player_state"] == 'finished')
         action = "Turn Stop"
       end
     end
 
-    if game["turn"].to_i < current_player["player_turn"].to_i
+    if game.turn < current_player["player_turn"].to_i
       action = "Turn Stop"
     end
 
     if action == "Turn Ended"
       new_turn = current_player["player_turn"].to_i + 1
-      set_player_state(game_id, player_id, 'finished', new_turn)
       move_requests["moves"].each do |move|
         Unit.find(move["unit_id"]).update(control_x: move["control-x"], control_y: move["control-y"], control_heading: move["control-heading"])
       end
+      set_player_state(game_id, player_id, 'finished', new_turn)
     end
 
-    units = get_units(game_id)
-    {action: action, units: units}
+    { action: action }
   end
 
   def next_turn(game_id, player_id)
     current_player = get_player(player_id, game_id)
     other_players = get_other_players(player_id, game_id)
-    game = get_game(game_id)
     action = "Ready"
     first_action = 0
 
@@ -223,7 +221,7 @@ class DroneTournament
     new_x = unit.control_x + (unit_type.speed * Math.cos(unit.control_heading * @radian_modifier))
     new_y = unit.control_y + (unit_type.speed * Math.sin(unit.control_heading * @radian_modifier))
 
-    {x: new_x, y: new_y, heading: unit.heading}
+    {x: new_x, y: new_y, heading: unit.control_heading}
   end
 
   def set_player_state(game_id, player_id, state, next_turn)
@@ -233,39 +231,45 @@ class DroneTournament
   def check_all_players_ready(game_id, player_id)
     current_player = get_player(player_id, game_id)
     other_players = get_other_players(player_id, game_id)
+    game = Game.find(game_id)
 
     action = "Update Ready"
     other_players.each do |other_player|
-      if (other_player["player_turn"].to_i < current_player["player_turn"].to_i) ||
-        (other_player["player_turn"].to_i == current_player["player_turn"].to_i && other_player["player_state"] == "finished")
+      if (game.state == "updating") ||
+         (other_player["player_turn"].to_i < current_player["player_turn"].to_i) ||
+         (other_player["player_turn"].to_i == current_player["player_turn"].to_i &&
+          other_player["player_state"] == "finished")
         action = "Update Waiting"
       end
     end
 
     if action == "Update Ready"
-      game = get_game(game_id)
-      if game["turn"].to_i < current_player["player_turn"].to_i
-        next_turn = game["turn"].to_i + 1
+      if game.turn < current_player["player_turn"].to_i
+        game.update(state: "updating")
+        next_turn = game.turn + 1
         run_game_loop(game_id, 30)
         update_unit_positions(game_id)
-        Game.find(game_id).update(turn: next_turn)
+        game.update(turn: next_turn, state: "ready")
       end
 
       set_player_state(game_id, player_id, 'plan', current_player["player_turn"])
     end
-    units = get_units(game_id)
-    {action: action, units: units}
+
+    { action: action }
   end
 
   def load_types()
-    t_fighter = UnitType.new(name: "T-Fighter", speed: 100, turn: 5, armor: 6, full_energy: 100, charge_energy: 6, image_name: "t_fighter.png")
-    t_fighter.save
+    types = UnitType.where(version: @version)
+    if types.count == 0
+      t_fighter = UnitType.new(name: "T-Fighter", speed: 100, turn: 4, armor: 6, full_energy: 100, charge_energy: 6, image_name: "t_fighter.png", version: @version)
+      t_fighter.save
 
-    eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 120, turn: 4, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png")
-    eye_fighter.save
+      eye_fighter = UnitType.new(name: "Eye-Fighter", speed: 120, turn: 3, armor: 2, full_energy: 100, charge_energy: 4, image_name: "eye_fighter.png", version: @version)
+      eye_fighter.save
 
-    single_turret = UnitType.new(name: "Single Turret", speed: 0, turn: 2, armor: 3, full_energy: 100, charge_energy: 10, image_name: "single_turret.png")
-    single_turret.save
+      single_turret = UnitType.new(name: "Single Turret", speed: 0, turn: 2, armor: 3, full_energy: 100, charge_energy: 10, image_name: "single_turret.png", version: @version)
+      single_turret.save
+    end
   end
 
 
@@ -300,7 +304,6 @@ class DroneTournament
           else
             Unit.find(unit.id).update(energy: unit.energy)
           end
-
         end
       end
 
@@ -359,7 +362,7 @@ class DroneTournament
         unit.update(control_x: last_point[:x], control_y: last_point[:y], control_heading: last_point[:heading])
       end
     end
-    {action: "Server Move Points", move_points: move_points}
+    { action: "Server Move Points", move_points: move_points }
   end
 
   def create_move_points(unit_id, steps)
